@@ -35,6 +35,14 @@ const int MAX_VAD_OUTPUT = 24000;
 #define SD_SCK 21
 #define SD_CS 48
 
+// for debugging cmvn only
+unsigned long recordingStartTime = 0;
+unsigned long recordingDuration = 0;
+unsigned long recordingEndTime = 0;
+
+unsigned long CMVNDuration = 0;
+unsigned long MFCCDuration = 0;
+
 int16_t *fullBuffer = nullptr; // Copy of filtered recording (TOTAL_SAMPLES)
 int16_t *vad_output = nullptr; // Output after VAD (MAX_VAD_OUTPUT)
 
@@ -265,6 +273,7 @@ void loop()
 
 void startRecording()
 {
+  recordingStartTime = micros(); // <<< START timing
   Serial.println("Recording started.");
   showStatus("Recording");
 
@@ -314,6 +323,7 @@ void startRecording()
 
 void stopRecording()
 {
+  recordingEndTime = micros(); //
   Serial.println("Recording stopped.");
   showStatus("Processing");
 
@@ -361,25 +371,26 @@ void stopRecording()
 
   if (vad_sample_count > 0)
   {
-    // Update threshold
     vad_update_threshold_after_speech(&vad);
-    Serial.printf("Updated Threshold: %.3f\n", vad.threshold);
 
-    // MFCC + CMVN features
+    // ===== MFCC timing =====
+    unsigned long t0 = micros();
     extract_mfcc(vad_output, vad_sample_count, SAMPLE_RATE, &mfcc_result);
-    extract_cmvn_features(&mfcc_result);
+    unsigned long t1 = micros();
+    MFCCDuration = t1 - t0;
 
-    // Save CSV: base on wav name
+    // ===== CMVN timing =====
+    unsigned long t2 = micros();
+    extract_cmvn_features(&mfcc_result);
+    unsigned long t3 = micros();
+    CMVNDuration = t3 - t2;
+
+    // Save CSV
     String csv_name = filename;
     csv_name.replace(".wav", "_cmvn.csv");
     save_cmvn_csv_55x39(csv_name.c_str(), &mfcc_result);
-
-    // Optional debug print
-    // Serial.printf("feat[0][0] MFCC/Δ/ΔΔ: %.4f, %.4f, %.4f\n",
-    //               mfcc_result.feat[0][0][0],
-    //               mfcc_result.feat[0][0][1],
-    //               mfcc_result.feat[0][0][2]);
   }
+
   else
   {
     Serial.println("No voiced audio detected. Skipping MFCC/CMVN/CSV.");
@@ -400,6 +411,11 @@ void stopRecording()
   }
 
   showStatus("Done");
+  recordingDuration = recordingEndTime - recordingStartTime;
+  Serial.printf("Recording time : %.2f ms\n", recordingDuration / 1000.0f);
+  Serial.printf("MFCC time      : %.2f ms\n", MFCCDuration / 1000.0f);
+  Serial.printf("CMVN time      : %.2f ms\n", CMVNDuration / 1000.0f);
+
   Serial.flush();
 }
 
@@ -410,7 +426,6 @@ void handleAudioProcessing()
   if (!samplingFlag)
     return;
 
-  // Catch up loop: if timer fired multiple times, we process until flag cleared
   // (simple approach; good enough for many cases)
   while (samplingFlag)
   {
@@ -518,7 +533,7 @@ void showStatus(const char *msg)
 String getUniqueFilename()
 {
   int fileIndex = getLastFileIndex();
-  String name = "/Test130126Module_" + String(fileIndex) + ".wav";
+  String name = "/Test190126Module_" + String(fileIndex) + ".wav";
   saveLastFileIndex(fileIndex + 1);
   return name;
 }
